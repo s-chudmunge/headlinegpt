@@ -1,137 +1,127 @@
-# HeadlineGPT 🚀
+# headlinegpt
 
-[![Hugging Face Model](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-HeadlineGPT-yellow)](https://huggingface.co/csankalp21/headlinegpt)
-[![Hugging Face ONNX](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-HeadlineGPT--ONNX%20(WebGPU)-blue)](https://huggingface.co/csankalp21/headlinegpt-onnx)
-[![HF Model Downloads](https://img.shields.io/badge/HF%20Downloads-170%2B-brightgreen)](https://huggingface.co/csankalp21/headlinegpt)
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/s-chudmunge/headlinegpt/blob/main/HeadlineGPT_Training_and_Export.ipynb)
-[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+> "Can we train an LLM to write titles that people actually want to read, without doing painful RLHF?"
 
-**HeadlineGPT** is a fine-tuned language model based on [Qwen/Qwen2.5-1.5B-Instruct](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct), purpose-built for turning articles, social media posts, academic papers, and talks into concise, catchy, and high-engagement titles and headlines.
+A clean, hackable, end-to-end recipe for fine-tuning small language models on headline generation using **Reward-Weighted Supervised Fine-Tuning (SFT)**. 
 
-Available both as standard PyTorch/Safetensors weights on Hugging Face and as an optimized ONNX / WebGPU export for **100% private, zero-server in-browser inference** via [Transformers.js](https://huggingface.co/docs/transformers.js).
+Based on `Qwen/Qwen2.5-1.5B-Instruct`. Includes full Google Colab training code, PyTorch weights, and exports to both **GGUF** (for CPU/local inference) and **ONNX / WebGPU** (for running 100% inside your browser with zero servers).
 
 ---
 
-## 🌟 Quick Links & Hugging Face Hub
+### Links & Artifacts
 
-| Model | Format & Target | Downloads | Link |
-|---|---|---|---|
-| **HeadlineGPT (Base LoRA/Merged)** | PyTorch / Safetensors (1.5B) | **124+ downloads** | [csankalp21/headlinegpt](https://huggingface.co/csankalp21/headlinegpt) |
-| **HeadlineGPT ONNX (WebGPU)** | ONNX FP16 / Transformers.js | **48+ downloads** | [csankalp21/headlinegpt-onnx](https://huggingface.co/csankalp21/headlinegpt-onnx) |
-| **Full Training & Export Notebook** | Jupyter / Google Colab | — | [HeadlineGPT_Training_and_Export.ipynb](HeadlineGPT_Training_and_Export.ipynb) |
+* 🚀 **Model (Safetensors / PyTorch)**: [`csankalp21/headlinegpt`](https://huggingface.co/csankalp21/headlinegpt) (~124+ downloads)
+* ⚡ **Browser Model (ONNX / WebGPU)**: [`csankalp21/headlinegpt-onnx`](https://huggingface.co/csankalp21/headlinegpt-onnx) (~48+ downloads)
+* 📓 **Notebook (Train + Eval + Export)**: [`HeadlineGPT_Training_and_Export.ipynb`](HeadlineGPT_Training_and_Export.ipynb) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/s-chudmunge/headlinegpt/blob/main/HeadlineGPT_Training_and_Export.ipynb)
 
-Total Hub Downloads: **170+ downloads** across Safetensors & ONNX packages.
+Combined HF downloads: **~170+** across PyTorch and ONNX models.
 
 ---
 
-## 💡 Key Highlights
+## Why this exists: The Problem with Standard SFT
 
-- **Base Architecture**: `Qwen2.5-1.5B-Instruct` — lightweight, fast, and highly capable.
-- **Reward-Weighted SFT**: Instead of treating every training headline equally, training loss is dynamically modulated by an engagement/reward score:
-  $$\mathcal{L}_{\text{weighted}} = (1.0 + \text{reward}) \times \mathcal{L}_{\text{CE}}$$
-- **Parameter-Efficient**: Trained using LoRA ($r=16, \alpha=32$) on 4-bit quantized base weights (`paged_adamw_8bit`), enabling training within consumer/Colab T4 GPU limits.
-- **Edge & Browser Ready**:
-  - Exported to **GGUF** (F16 and Q4_K_M) for local CLI CPU/GPU inference with `llama.cpp`.
-  - Exported to **ONNX FP16** and compiled for **WebGPU/Wasm** for client-side execution directly inside the browser.
+If you take a base instruction model and fine-tune it with standard Cross-Entropy Loss on a corpus of articles and titles, the model simply learns the *average* style across the entire dataset:
+
+$$\mathcal{L}_{\text{SFT}} = - \frac{1}{T} \sum_{t=1}^{T} \log P(w_t \mid w_{<t}, x)$$
+
+The problem? In any real-world content dataset, most titles are completely mediocre. Only a small fraction are genuinely punchy, high-engagement headlines that drive curiosity and clarity. 
+
+You usually have three ways to tackle this:
+1. **Hard filtering**: Throw away 80% of your data and keep only top percentiles. (Wastes data diversity, hurts general language competence).
+2. **RLHF / PPO / DPO**: Train reward models, manage reference policies, handle stability issues. (Heavy engineering overhead, tricky on a single GPU).
+3. **Reward-Weighted SFT (Our Approach)**: Keep all the data so the model maintains broad topic coverage, but modulate the token gradient by an empirical engagement score:
+
+$$\mathcal{L}_{\text{weighted}} = (1.0 + R(x)) \cdot \mathcal{L}_{\text{CE}}$$
+
+Where $R(x) \in [0.0, 1.0]$ is computed from real-world engagement metrics (CTR, claps, likes, shares). A great title that earned a $0.95$ score exerts almost double the gradient pull of a flat, unengaging title ($0.0$). It's dead simple, remarkably stable, and fits on a free Google Colab T4 GPU.
 
 ---
 
-## 📊 Dataset & Schema
+## Dataset: What the model learns from
 
-The model was trained on content–title pairs extracted from real-world published articles and posts, along with rich engagement and viral metrics.
+We trained on paired content-title instances where each sample has associated empirical audience metrics:
 
-### Raw Data Schema
+```json
+{
+  "content": "Full article body or summary...",
+  "title": "Published title...",
+  "metrics": {
+    "impressions": 14200,
+    "clicks": 1820,
+    "ctr": 0.128,
+    "claps": 450,
+    "shares": 85,
+    "score": 92
+  },
+  "reward_score": 0.84
+}
+```
 
-Each sample in `master_training_dataset.jsonl` contains:
-- `content`: Full text body or abstract.
-- `title`: Actual published headline.
-- `metrics`:
-  - `impressions`, `clicks`, `ctr`
-  - `claps`, `responses`, `score`
-  - `comments`, `views`, `likes`, `shares`
-  - `facebook`, `linkedin`
-- `metadata`: Source, category, tags, and timestamps.
-- `reward_score`: Scaled engagement metric ($[0.0, 1.0]$) computed from CTR, claps, likes, and share velocity.
+The data is mapped into Qwen's chat format:
+* **System**: `"You are an expert at writing highly engaging titles."`
+* **User**: `"Generate a high-engagement title for the following content:\n\n<content>"`
+* **Assistant**: `"<title>"`
 
-### Chat Template Formatting
+---
 
-Each record was wrapped in Qwen's standard chat template:
+## The Training Setup
+
+Everything was run inside a single Google Colab session on a modest **NVIDIA T4 (16GB)**:
+
+* **Base Model**: `Qwen/Qwen2.5-1.5B-Instruct`
+* **Quantization**: 4-bit (`bitsandbytes`, `nf4` compute in `fp16`)
+* **PEFT / LoRA**:
+  * $r = 16$, $\alpha = 32$, dropout $= 0.05$
+  * Targets: `q_proj`, `k_proj`, `v_proj`, `o_proj`, `gate_proj`, `up_proj`, `down_proj`
+  * Only **~1.2%** of model parameters are trained
+* **Batching**: Per-device batch size `1`, `gradient_accumulation_steps = 16` (effective batch size 16)
+* **Optimization**: `paged_adamw_8bit`, cosine LR schedule, peak LR `2e-4`, 50 warmup steps, 2 epochs on 25,000 sampled items.
+
+### The Loss Function (Under the Hood)
+
+Here is the exact PyTorch loss implementation used in the custom `WeightedTrainer`:
+
 ```python
-messages = [
-    {
-        "role": "system",
-        "content": "You are an expert at writing highly engaging titles."
-    },
-    {
-        "role": "user",
-        "content": f"Generate a high-engagement title for the following content:\n\n{content}"
-    },
-    {
-        "role": "assistant",
-        "content": title
-    }
-]
+class WeightedTrainer(Trainer):
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+        # Extract reward scalar and compute per-sample multiplier
+        reward = inputs.pop("reward_score").float()
+        weights = 1.0 + reward  # shape: (batch_size,)
+
+        labels = inputs["labels"]
+        outputs = model(
+            input_ids=inputs["input_ids"],
+            attention_mask=inputs["attention_mask"],
+            labels=labels,
+        )
+
+        logits = outputs.logits
+        shift_logits = logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
+
+        # Unreduced cross entropy across tokens
+        loss_fct = nn.CrossEntropyLoss(reduction="none")
+        loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+        loss = loss.view(shift_labels.size())
+
+        # Mask padding tokens and compute per-sequence loss
+        mask = (shift_labels != -100)
+        per_sample_loss = (loss * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1)
+
+        # Scale loss by engagement weight
+        weighted_loss = (per_sample_loss * weights).mean()
+        return (weighted_loss, outputs) if return_outputs else weighted_loss
 ```
 
 ---
 
-## 🧠 Training Process
+## Quickstart
 
-Standard Supervised Fine-Tuning (SFT) learns the *average* style across all training samples, regardless of whether a title went viral or underperformed. 
+### 1. Python (`transformers`)
 
-To teach the model to favor click-worthy, engaging titles, **Reward-Weighted SFT** was employed:
-
-1. **Dataset Split & Sampling**:
-   - 90% Train / 10% Validation split (`seed=42`).
-   - Sampled subset of **25,000 examples** with sequence length capped at 512 tokens.
-2. **Custom Weighted Trainer**:
-   A custom PyTorch loss function scales cross-entropy token loss using each sample's `reward_score`:
-   ```python
-   class WeightedTrainer(Trainer):
-       def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
-           reward = inputs.pop("reward_score").float()
-           weights = 1.0 + reward  # High-scoring samples receive higher weight
-
-           labels = inputs["labels"]
-           outputs = model(
-               input_ids=inputs["input_ids"],
-               attention_mask=inputs["attention_mask"],
-               labels=labels,
-           )
-
-           shift_logits = outputs.logits[..., :-1, :].contiguous()
-           shift_labels = labels[..., 1:].contiguous()
-
-           loss_fct = nn.CrossEntropyLoss(reduction="none")
-           loss = loss_fct(
-               shift_logits.view(-1, shift_logits.size(-1)),
-               shift_labels.view(-1)
-           )
-           loss = loss.view(shift_labels.size())
-
-           mask = (shift_labels != -100)
-           per_sample_loss = (loss * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1)
-
-           weighted_loss = (per_sample_loss * weights).mean()
-           return (weighted_loss, outputs) if return_outputs else weighted_loss
-   ```
-3. **LoRA Hyperparameters**:
-   - Rank ($r$): `16`
-   - Alpha ($\alpha$): `32`
-   - Dropout: `0.05`
-   - Target Modules: `q_proj`, `k_proj`, `v_proj`, `o_proj`, `gate_proj`, `up_proj`, `down_proj`
-4. **Optimization**:
-   - Epochs: `2`
-   - Batch Size: `1` per device with `gradient_accumulation_steps=16` (effective batch size = 16)
-   - Optimizer: `paged_adamw_8bit`
-   - Learning Rate: `2e-4` with cosine schedule and 50 warmup steps
-   - Mixed Precision: `FP16`
-
----
-
-## 💻 Usage
-
-### 1. Python (`transformers` + PyTorch)
+```bash
+pip install transformers torch accelerate
+```
 
 ```python
 import torch
@@ -147,43 +137,38 @@ model = AutoModelForCausalLM.from_pretrained(
 )
 
 content = """
-Researchers have developed a new solid-state battery architecture that increases 
-energy density by 40% while eliminating fire hazards common in traditional lithium-ion cells. 
-Automakers expect commercial deployment by 2028.
+DeepMind researchers have trained a robotic hand to solve a Rubik's cube 
+one-handed using domain randomization and meta-learning, showing unprecedented 
+dexterity and physical robustness to perturbations.
 """
 
 messages = [
-    {
-        "role": "system",
-        "content": "You are an expert at writing highly engaging titles."
-    },
-    {
-        "role": "user",
-        "content": f"Generate a high-engagement title for the following content:\n\n{content}"
-    }
+    {"role": "system", "content": "You are an expert at writing highly engaging titles."},
+    {"role": "user", "content": f"Generate a high-engagement title for the following content:\n\n{content}"}
 ]
 
 prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
 
-outputs = model.generate(
-    **inputs,
-    max_new_tokens=40,
-    temperature=0.7,
-    do_sample=True,
-    top_p=0.9,
-    repetition_penalty=1.1
-)
+with torch.inference_mode():
+    outputs = model.generate(
+        **inputs,
+        max_new_tokens=30,
+        temperature=0.7,
+        top_p=0.9,
+        repetition_penalty=1.1,
+        do_sample=True
+    )
 
 headline = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
-print("Generated Headline:", headline.strip())
+print("Headline:", headline.strip())
 ```
 
 ---
 
-### 2. In-Browser / WebGPU (`Transformers.js` / ONNX)
+### 2. Run in the Browser with WebGPU (Zero Server Costs)
 
-Run inference client-side with no backend servers:
+Because the weights were converted to ONNX FP16 and hosted on Hugging Face, you can run the entire model right in a user's browser using `@huggingface/transformers` (Transformers.js v3).
 
 ```bash
 npm install @huggingface/transformers
@@ -192,71 +177,73 @@ npm install @huggingface/transformers
 ```javascript
 import { pipeline } from "@huggingface/transformers";
 
+// Downloads and caches model in IndexedDB, runs on local GPU via WebGPU
 const generator = await pipeline(
   "text-generation",
   "csankalp21/headlinegpt-onnx",
-  {
-    device: "webgpu",
-    dtype: "fp16",
-  }
+  { device: "webgpu", dtype: "fp16" }
 );
 
 const messages = [
   { role: "system", content: "You are an expert at writing highly engaging titles." },
-  { role: "user", content: "Generate a high-engagement title for the following content:\n\nOpenAI announces new lightweight reasoning models designed for real-time mobile agents." }
+  { role: "user", content: "Generate a high-engagement title for the following content:\n\nAnthropic releases Claude 3.7 Sonnet featuring hybrid fast and extended reasoning modes in a single architecture." }
 ];
 
-const output = await generator(messages, {
-  max_new_tokens: 35,
-  temperature: 0.7,
-  do_sample: true
-});
-
-console.log("Headline:", output[0].generated_text.at(-1).content);
+const output = await generator(messages, { max_new_tokens: 30, temperature: 0.7 });
+console.log(output[0].generated_text.at(-1).content);
 ```
 
 ---
 
-### 3. Local CLI with `llama.cpp` (GGUF)
+### 3. Local C++ Inference with `llama.cpp`
 
-As detailed in the [notebook](HeadlineGPT_Training_and_Export.ipynb), the merged LoRA checkpoint can be converted directly into GGUF format:
+The notebook includes full cells to merge the LoRA adapter back into base weights and convert to GGUF:
 
 ```bash
-# Convert to GGUF F16
+# Convert to GGUF F16 & Quantize to 4-bit
 python convert_hf_to_gguf.py ./merged_model --outfile HeadlineGPT-F16.gguf --outtype f16
-
-# Quantize to 4-bit (Q4_K_M)
 ./llama-quantize HeadlineGPT-F16.gguf HeadlineGPT-Q4_K_M.gguf Q4_K_M
 
-# Run inference
-./llama-cli -m HeadlineGPT-Q4_K_M.gguf -p "<|im_start|>system\nYou are an expert at writing highly engaging titles.<|im_end|>\n<|im_start|>user\nGenerate a high-engagement title for the following content:\n\nSpaceX successfully catches Starship booster on first attempt.<|im_end|>\n<|im_start|>assistant\n" -n 40 --temp 0.7
+# Run instant CPU inference
+./llama-cli -m HeadlineGPT-Q4_K_M.gguf \
+  -p "<|im_start|>system\nYou are an expert at writing highly engaging titles.<|im_end|>\n<|im_start|>user\nGenerate a high-engagement title for the following content:\n\nJames Webb Space Telescope detects carbon-bearing molecules in the atmosphere of habitable-zone exoplanet K2-18b.<|im_end|>\n<|im_start|>assistant\n" \
+  -n 30 --temp 0.7
 ```
 
 ---
 
-## 📁 Repository Structure
+## File Structure
 
 ```
 headlinegpt/
-├── HeadlineGPT_Training_and_Export.ipynb  # End-to-end training, eval, LoRA merge, GGUF & ONNX export
-├── README.md                              # Model overview, benchmarks, HF hub links, and tutorials
-└── LICENSE                                # Apache 2.0 License
+├── HeadlineGPT_Training_and_Export.ipynb  # Self-contained notebook: data loading -> weighted SFT -> LoRA merge -> GGUF/ONNX
+├── README.md                              # What you are reading
+├── requirements.txt                       # Minimal pip dependencies
+└── LICENSE                                # Apache 2.0
 ```
 
 ---
 
-## 📜 Citation & Acknowledgements
+## What's Next / Interesting Extensions
 
-If you use HeadlineGPT in your research or application, please cite:
+* **Mechanistic Interpretability**: Neel Nanda-style logit lens and attention inspection: *Which attention heads specifically attend to high-salience trigger words in the body text when proposing a catchy title?*
+* **DPO Comparison**: Benchmarking reward-weighted SFT against Direct Preference Optimization (DPO) on the same 25k split to measure compute-to-quality tradeoffs.
+* **4-bit / 8-bit ONNX**: Quantizing the in-browser model from FP16 (~3.7GB) down to Int4/Int8 (~900MB) for instant mobile web loading.
+
+---
+
+## Acknowledgements & Citations
+
+* The [Qwen Team](https://github.com/QwenLM/Qwen2.5) for `Qwen2.5-1.5B`, an absurdly good small base model.
+* Hugging Face for `transformers`, `peft`, and `transformers.js` (WebGPU runtime).
+* Gerganov and the `llama.cpp` community for making local LLM deployment joyful.
 
 ```bibtex
-@misc{headlinegpt2026,
-  author = {Sankalp Chudmunge},
+@misc{chudmunge2026headlinegpt,
+  author = {Chudmunge, Sankalp},
   title = {HeadlineGPT: Reward-Weighted Fine-Tuned Title Generation Model},
   year = {2026},
-  publisher = {Hugging Face},
-  howpublished = {\url{https://huggingface.co/csankalp21/headlinegpt}}
+  publisher = {GitHub},
+  howpublished = {\url{https://github.com/s-chudmunge/headlinegpt}}
 }
 ```
-
-Special thanks to the [Qwen Team](https://github.com/QwenLM/Qwen2.5) for the Qwen2.5 base model and the [Hugging Face Transformers.js](https://github.com/huggingface/transformers.js) team for WebGPU acceleration support.
