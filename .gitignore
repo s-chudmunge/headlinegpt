@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# Jupyter
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+
+# Model checkpoints & weights
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.gguf
+*.onnx
+*.onnx_data
+final_lora/
+merged_model/
+llama.cpp/
+
+# Environment / OS
+.DS_Store
+.env
